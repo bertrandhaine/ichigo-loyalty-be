@@ -1,6 +1,14 @@
 import { Table, Column, Model, DataType, HasMany } from "sequelize-typescript";
 import { Orders } from "./Order";
 
+export interface CustomerAttributes {
+  customerId: string;
+  customerName: string;
+  tier: string;
+  totalSpent: number;
+  lastTierUpdate: Date;
+}
+
 @Table({
   tableName: "customers",
   freezeTableName: true,

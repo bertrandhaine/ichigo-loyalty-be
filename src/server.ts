@@ -1,9 +1,9 @@
 // src/server.ts
 import express from "express";
 import sequelize from "./database";
-import { Customers, Orders } from "./models";
 import { LoyaltyService } from "./services/LoyaltyService";
 import { OrderService } from "./services/OrderService";
+import cors from "cors";
 
 /**
  * Express application instance.
@@ -18,6 +18,7 @@ const port = process.env.PORT || 3000;
 
 // Middleware
 app.use(express.json());
+app.use(cors());
 
 /**
  * Create a new order.

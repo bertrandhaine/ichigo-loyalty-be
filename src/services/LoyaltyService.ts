@@ -3,6 +3,9 @@ import { Orders } from "../models/Order";
 import { Op } from "sequelize";
 
 export class LoyaltyService {
+  private static readonly GOLD_THRESHOLD = 50000;
+  private static readonly SILVER_THRESHOLD = 10000;
+
   /**
    * Calculate the start date of the last year for loyalty tier calculations.
    * @returns Date representing the start of the last year
@@ -17,9 +20,9 @@ export class LoyaltyService {
    * @param totalSpent Total amount spent by the customer in cents
    * @returns The loyalty tier as a string: "Gold", "Silver", or "Bronze"
    */
-  private calculateTier(totalSpent: number): string {
-    if (totalSpent >= 50000) return "Gold";
-    if (totalSpent >= 10000) return "Silver";
+  private calculateTier(totalSpent: number): "Gold" | "Silver" | "Bronze" {
+    if (totalSpent >= LoyaltyService.GOLD_THRESHOLD) return "Gold";
+    if (totalSpent >= LoyaltyService.SILVER_THRESHOLD) return "Silver";
     return "Bronze";
   }
 
@@ -28,23 +31,14 @@ export class LoyaltyService {
    * @param id Customer ID
    * @throws Error if the customer is not found
    */
-  async updateCustomerTier(id: string) {
+  async updateCustomerTier(id: string): Promise<void> {
     const customer = await Customers.findByPk(id);
     if (!customer) throw new Error("Customer not found");
 
     const startOfLastYear = this.startOfLastYear();
-    const orders = await Orders.findAll({
-      where: {
-        customerId: customer.customerId,
-        date: {
-          [Op.gte]: startOfLastYear,
-        },
-      },
-    });
-
-    const totalSpent = orders.reduce(
-      (sum, order) => sum + order.totalInCents,
-      0
+    const totalSpent = await this.calculateTotalSpent(
+      customer.customerId,
+      startOfLastYear
     );
     const currentTier = this.calculateTier(totalSpent);
 
@@ -62,50 +56,37 @@ export class LoyaltyService {
    * @returns Object containing detailed tier information
    * @throws Error if the customer is not found
    */
-  async getCustomerTierInfo(id: string) {
+  async getCustomerTierInfo(id: string): Promise<CustomerTierInfo> {
     const customer = await Customers.findByPk(id);
     if (!customer) throw new Error("Customer not found");
 
     const startOfLastYear = this.startOfLastYear();
+    const startOfCurrentYear = new Date(new Date().getFullYear(), 0, 1);
 
-    const orders = await Orders.findAll({
-      where: {
-        customerId: customer.customerId,
-        date: {
-          [Op.gte]: startOfLastYear,
-        },
-      },
-    });
-
-    const totalSpent = orders.reduce(
-      (sum, order) => sum + order.totalInCents,
-      0
+    const totalSpentLastYear = await this.calculateTotalSpent(
+      customer.customerId,
+      startOfLastYear
     );
-    const currentTier = this.calculateTier(totalSpent);
+    const totalSpentCurrentYear = await this.calculateTotalSpent(
+      customer.customerId,
+      startOfCurrentYear
+    );
+
+    const currentTier = this.calculateTier(totalSpentLastYear);
+
+    const tierInfo = this.calculateTierInfo(
+      currentTier,
+      totalSpentLastYear,
+      totalSpentCurrentYear
+    );
 
     return {
+      name: customer.customerName,
       tier: currentTier,
       startOfTierCalculation: startOfLastYear,
-      totalSpent,
-      amountToNextTier:
-        currentTier === "Gold"
-          ? 0
-          : currentTier === "Silver"
-          ? 50000 - totalSpent
-          : 10000 - totalSpent,
-      downgradeTier:
-        currentTier === "Gold" && totalSpent < 50000
-          ? "Silver"
-          : currentTier === "Silver" && totalSpent < 10000
-          ? "Bronze"
-          : null,
-      downgradeDate: new Date(new Date().getFullYear(), 11, 31),
-      amountToAvoidDowngrade:
-        currentTier === "Gold"
-          ? Math.max(50000 - totalSpent, 0)
-          : currentTier === "Silver"
-          ? Math.max(10000 - totalSpent, 0)
-          : 0,
+      totalSpent: totalSpentLastYear,
+      ...tierInfo,
+      totalSpentCurrentYear,
     };
   }
 
@@ -119,4 +100,73 @@ export class LoyaltyService {
       await this.updateCustomerTier(customer.customerId.toString());
     }
   }
+
+  private async calculateTotalSpent(
+    customerId: string,
+    startDate: Date
+  ): Promise<number> {
+    const orders = await Orders.findAll({
+      where: {
+        customerId,
+        date: { [Op.gte]: startDate },
+      },
+    });
+
+    return orders.reduce((sum, order) => sum + order.totalInCents, 0);
+  }
+
+  private calculateTierInfo(
+    currentTier: string,
+    totalSpentLastYear: number,
+    totalSpentCurrentYear: number
+  ) {
+    let amountToNextTier = 0;
+    let downgradeTier: string | null = null;
+    let amountToAvoidDowngrade = 0;
+
+    switch (currentTier) {
+      case "Gold":
+        amountToAvoidDowngrade = Math.max(
+          LoyaltyService.GOLD_THRESHOLD - totalSpentCurrentYear,
+          0
+        );
+        downgradeTier =
+          totalSpentCurrentYear < LoyaltyService.GOLD_THRESHOLD
+            ? "Silver"
+            : null;
+        break;
+      case "Silver":
+        amountToNextTier = LoyaltyService.GOLD_THRESHOLD - totalSpentLastYear;
+        amountToAvoidDowngrade = Math.max(
+          LoyaltyService.SILVER_THRESHOLD - totalSpentCurrentYear,
+          0
+        );
+        downgradeTier =
+          totalSpentCurrentYear < LoyaltyService.SILVER_THRESHOLD
+            ? "Bronze"
+            : null;
+        break;
+      default:
+        amountToNextTier = LoyaltyService.SILVER_THRESHOLD - totalSpentLastYear;
+    }
+
+    return {
+      amountToNextTier,
+      downgradeTier,
+      downgradeDate: new Date(new Date().getFullYear() + 1, 0, 1),
+      amountToAvoidDowngrade,
+    };
+  }
+}
+
+interface CustomerTierInfo {
+  name: string;
+  tier: string;
+  startOfTierCalculation: Date;
+  totalSpent: number;
+  amountToNextTier: number;
+  downgradeTier: string | null;
+  downgradeDate: Date;
+  amountToAvoidDowngrade: number;
+  totalSpentCurrentYear: number;
 }

@@ -43,7 +43,10 @@ This project implements a RESTful API for a customer loyalty program using Node.
    - Create a user named `loyalty_user` with password `loyalty`
    - Grant all privileges on `loyalty_db` to `loyalty_user`
 
-4. Build the TypeScript code:
+4. Configure the database connection:
+   Update the database configuration in `src/database.ts` if needed.
+
+5. Build the TypeScript code:
    ```
    npm run build
    ```
@@ -100,6 +103,26 @@ Example cron job (run at 23:59 on December 31st):
 ```
 
 Replace `/path/to/your/script.sh` with the actual path to your script.
+
+Here's an example of what the `script.sh` might look like:
+
+```bash
+#!/bin/bash
+
+# Set the API endpoint URL
+API_URL="http://localhost:3000/recalculate-tiers"
+
+# Make the POST request to recalculate tiers
+curl -X POST $API_URL
+
+# Log the result
+echo "Tier recalculation triggered at $(date)" >> /path/to/loyalty_recalculation.log
+```
+
+Make sure to:
+1. Replace `http://localhost:3000` with your actual API URL if it's different.
+2. Update the log file path (`/path/to/loyalty_recalculation.log`) as needed.
+3. Make the script executable by running `chmod +x /path/to/your/script.sh`.
 
 ## License
 

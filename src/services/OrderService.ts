@@ -1,67 +1,77 @@
-import { Orders } from "../models/Order";
+import { Orders, OrderAttributes } from "../models/Order";
+import { Customers, CustomerAttributes } from "../models/Customer";
 import { LoyaltyService } from "./LoyaltyService";
-import { Op } from "sequelize";
-import { Customers } from "../models/Customer";
+import { Transaction } from "sequelize";
+import sequelize from "../database";
+
+interface OrderData extends OrderAttributes {
+  customerName: string;
+}
 
 export class OrderService {
-  /**
-   * Creates a new order for a customer, ensuring the customer exists or creating them if not.
-   * Also updates the customer's loyalty tier after the order is created.
-   * @param orderData Object containing order details (customerId, customerName, orderId, totalInCents, date)
-   * @returns The created order
-   * @throws Error if the customer cannot be found or created
-   */
-  async createOrder(orderData: {
-    customerId: string;
-    customerName: string;
-    orderId: string;
-    totalInCents: number;
-    date: string;
-  }) {
-    // First, ensure the customer exists or create them
-    const [customer] = await Customers.findOrCreate({
-      where: { id: orderData.customerId },
-      defaults: { name: orderData.customerName },
-    });
+  private loyaltyService: LoyaltyService;
 
-    if (!customer) {
-      throw new Error("Customer not found");
-    }
-
-    // Create the order
-    const order = await Orders.create({
-      orderId: orderData.orderId,
-      customerId: orderData.customerId,
-      totalInCents: orderData.totalInCents,
-      date: new Date(orderData.date),
-    });
-
-    // Recalculate customer's tier
-    const loyaltyService = new LoyaltyService();
-    await loyaltyService.updateCustomerTier(orderData.customerId);
-
-    return order;
+  constructor(loyaltyService: LoyaltyService = new LoyaltyService()) {
+    this.loyaltyService = loyaltyService;
   }
 
-  /**
-   * Retrieves a paginated list of orders for a specific customer.
-   * @param customerId The ID of the customer
-   * @param page The page number for pagination
-   * @param limit The number of orders per page
-   * @returns An object containing the list of orders and the total count
-   */
-  async getCustomerOrders(customerId: string, page: number, limit: number) {
+  async createOrder(orderData: OrderData): Promise<OrderAttributes> {
+    return sequelize.transaction(async (t: Transaction) => {
+      const customer = await this.ensureCustomerExists(orderData, t);
+      const order = await this.createOrderRecord(orderData, t);
+      await this.loyaltyService.updateCustomerTier(customer.customerId);
+      return order;
+    });
+  }
+
+  async getCustomerOrders(
+    customerId: string,
+    page: number,
+    limit: number
+  ): Promise<{ orders: OrderAttributes[]; total: number }> {
     const offset = (page - 1) * limit;
     const { count, rows } = await Orders.findAndCountAll({
       where: { customerId },
       limit,
       offset,
-      order: [["createdAt", "DESC"]],
+      order: [["date", "DESC"]],
     });
 
     return {
       orders: rows,
       total: count,
     };
+  }
+
+  private async ensureCustomerExists(
+    orderData: OrderData,
+    transaction: Transaction
+  ): Promise<CustomerAttributes> {
+    const [customer] = await Customers.findOrCreate({
+      where: { customerId: orderData.customerId },
+      defaults: { customerName: orderData.customerName },
+      transaction,
+    });
+
+    if (!customer) {
+      throw new Error("Failed to find or create customer");
+    }
+
+    return customer;
+  }
+
+  private async createOrderRecord(
+    orderData: OrderData,
+    transaction: Transaction
+  ): Promise<OrderAttributes> {
+    return Orders.create(
+      {
+        orderId: orderData.orderId,
+        customerId: orderData.customerId,
+        totalInCents: orderData.totalInCents,
+        date: new Date(orderData.date),
+      },
+      { transaction }
+    );
   }
 }

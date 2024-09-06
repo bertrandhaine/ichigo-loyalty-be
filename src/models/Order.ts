@@ -8,6 +8,13 @@ import {
 } from "sequelize-typescript";
 import { Customers } from "./Customer";
 
+export interface OrderAttributes {
+  orderId: string;
+  customerId: number;
+  totalInCents: number;
+  date: Date;
+}
+
 @Table({
   tableName: "orders",
   freezeTableName: true,
