@@ -10,7 +10,7 @@ This project implements a RESTful API for a customer loyalty program using Node.
 - [API Endpoints](#api-endpoints)
 - [Database Schema](#database-schema)
 - [Loyalty Tiers](#loyalty-tiers)
-- [Recalculating Tiers](#recalculating-tiers)
+- [Yearly Tier Recalculation](#yearly-tier-recalculation)
 
 ## Features
 
@@ -67,8 +67,6 @@ The server will run on `http://localhost:3000` by default.
 - `GET /customer/:id/orders`: Get customer orders since last year with pagination
 - `POST /recalculate-tiers`: Recalculate loyalty tiers for all customers
 
-For detailed information on request/response formats, refer to the API documentation.
-
 ## Database Schema
 
 The project uses two main models:
@@ -88,41 +86,54 @@ The loyalty program has three tiers:
 
 Tiers are calculated based on the customer's total spending in the last year.
 
-## Recalculating Tiers
+## Yearly Tier Recalculation
 
-The `/recalculate-tiers` endpoint is provided to manually trigger a recalculation of all customer tiers. For production use, it's recommended to set up a cron job to recalculate tiers at the end of each year.
+To meet the requirement of recalculating customer tiers at the end of each year, we use the `recalculateAllTiers` method in the `LoyaltyService` class. This method is executed via a cron job on January 1st of each year.
 
-To set up a cron job:
+### Cron Job Setup
 
-1. Create a script that calls the `/recalculate-tiers` endpoint
-2. Use a task scheduler like cron (Linux/macOS) or Task Scheduler (Windows) to run the script at the end of each year
+The yearly tier recalculation is handled by a dedicated cron job file:
 
-Example cron job (run at 23:59 on December 31st):
+```typescript:src/job/recalculateTierJob.ts
+import cron from "node-cron";
+import { LoyaltyService } from "../services/LoyaltyService";
+
+async function recalculateYearlyTiers() {
+  console.log("Starting yearly tier recalculation...");
+  const loyaltyService = new LoyaltyService();
+  try {
+    await loyaltyService.recalculateAllTiers();
+    console.log("Yearly tier recalculation completed successfully.");
+  } catch (error) {
+    console.error("Error during yearly tier recalculation:", error);
+  }
+}
+
+// Schedule the job to run at 00:01 on January 1st
+cron.schedule("1 0 1 1 *", recalculateYearlyTiers);
+
+export { recalculateYearlyTiers };
+
 ```
-59 23 31 12 * /path/to/your/script.sh
-```
 
-Replace `/path/to/your/script.sh` with the actual path to your script.
+This job is set to run automatically at 00:01 on January 1st every year.
 
-Here's an example of what the `script.sh` might look like:
+### Implementation Details
 
-```bash
-#!/bin/bash
+1. The job uses the `node-cron` package to schedule the task.
+2. It creates an instance of `LoyaltyService` and calls the `recalculateAllTiers` method.
+3. Console logs are added for monitoring the start and completion of the recalculation process.
 
-# Set the API endpoint URL
-API_URL="http://localhost:3000/recalculate-tiers"
+### Deployment Instructions
 
-# Make the POST request to recalculate tiers
-curl -X POST $API_URL
+To ensure this cron job runs in your production environment:
 
-# Log the result
-echo "Tier recalculation triggered at $(date)" >> /path/to/loyalty_recalculation.log
-```
+1. Make sure the `src/job/recalculateTierJob.ts` file is included in your deployment package.
+2. If you're using a process manager like PM2, include this job in your ecosystem file or start it as a separate process.
+3. For containerized deployments (e.g., Docker), ensure this job is part of your application's startup process.
+4. In serverless environments, you may need to adapt this to use cloud-specific scheduling services (e.g., AWS CloudWatch Events with Lambda).
 
-Make sure to:
-1. Replace `http://localhost:3000` with your actual API URL if it's different.
-2. Update the log file path (`/path/to/loyalty_recalculation.log`) as needed.
-3. Make the script executable by running `chmod +x /path/to/your/script.sh`.
+Note: Ensure your server's timezone is correctly set, as the cron job timing is based on the server's local time.
 
 ## License
 
